@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
-#define PORT 3600
+#define PORT 3800
 #define IP "10.0.10.30"
 
 struct cal_data
@@ -23,12 +23,13 @@ struct cal_data
 
 int main(int argc, char **argv)
 {
-    struct sockaddr_in addr;
+    struct sockaddr_in server_addr;
     int s;
     int len;
     int sbyte, rbyte;
     struct cal_data sdata;
     int max_val, min_val;
+    socklen_t addr_len;
     
     if (argc != 1)
     {
@@ -36,22 +37,35 @@ int main(int argc, char **argv)
          return 1;
     }
 
-    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s == -1)
     {
          return 1;
     }
    
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);  // 서버의 포트 번호
-    addr.sin_addr.s_addr = inet_addr(IP);
-
-    if ( connect(s, (struct sockaddr *)&addr, sizeof(addr)) == -1 )
+    // 클라이언트 소켓에 동적 포트 할당
+    struct sockaddr_in client_addr;
+    memset((void *)&client_addr, 0x00, sizeof(client_addr));
+    client_addr.sin_family = AF_INET;
+    client_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    client_addr.sin_port = htons(0);  // 0으로 설정하여 시스템이 자동으로 포트 할당
+    
+    if (bind(s, (struct sockaddr *)&client_addr, sizeof(client_addr)) == -1)
     {
-         printf("fail to connect\n");
+         perror("bind error");
          close(s);
          return 1;
     }
+    
+    // 클라이언트가 사용하는 실제 포트 번호 출력
+    socklen_t addr_len = sizeof(client_addr);
+    getsockname(s, (struct sockaddr *)&client_addr, &addr_len);
+    printf("Client started on port %d\n", ntohs(client_addr.sin_port));
+   
+    memset((void *)&server_addr, 0x00, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);  // 서버의 포트 번호
+    server_addr.sin_addr.s_addr = inet_addr(IP);
 
     // 연산자가 '$'일 때까지 계속 통신
     while(1)
@@ -92,14 +106,20 @@ int main(int argc, char **argv)
         len = sizeof(sdata);
         sdata.left_num = htonl(sdata.left_num);
         sdata.right_num = htonl(sdata.right_num);
-        sbyte = write(s, (char *)&sdata, len);
+        
+        // UDP로 데이터 전송
+        sbyte = sendto(s, (char *)&sdata, len, 0, 
+                      (struct sockaddr *)&server_addr, sizeof(server_addr));
         if(sbyte != len)
         {
              close(s);
              return 1;
         }
 
-        rbyte = read(s, (char *)&sdata, len);
+        // UDP로 데이터 수신
+        addr_len = sizeof(server_addr);
+        rbyte = recvfrom(s, (char *)&sdata, len, 0, 
+                        (struct sockaddr *)&server_addr, &addr_len);
         if(rbyte != len)
         {
              close(s);
@@ -123,13 +143,17 @@ int main(int argc, char **argv)
     }
 
     // 서버로부터 최대값/최소값 수신
-    rbyte = read(s, (char *)&max_val, sizeof(max_val));
+    addr_len = sizeof(server_addr);
+    rbyte = recvfrom(s, (char *)&max_val, sizeof(max_val), 0, 
+                    (struct sockaddr *)&server_addr, &addr_len);
     if(rbyte == sizeof(max_val))
     {
         max_val = ntohl(max_val);
     }
     
-    rbyte = read(s, (char *)&min_val, sizeof(min_val));
+    addr_len = sizeof(server_addr);
+    rbyte = recvfrom(s, (char *)&min_val, sizeof(min_val), 0, 
+                    (struct sockaddr *)&server_addr, &addr_len);
     if(rbyte == sizeof(min_val))
     {
         min_val = ntohl(min_val);

@@ -8,7 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
  
-#define PORT_NUM 3800
+#define PORT_NUM 50789
 #define MAXLEN 256 
  
 struct cal_data
